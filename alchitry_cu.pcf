@@ -12,3 +12,9 @@ set_io led[7] N14
 
 set_io usb_rx P14 # tx in the schematic
 set_io usb_tx M9  # rx in the schematic
+# OLED display - Br Bank B (iCE40 pin names)
+set_io oled_sclk  H11   # B27
+set_io oled_mosi  F11   # B33
+set_io oled_cs_n  C12   # B39
+set_io oled_dc    D7    # B45
+set_io oled_rst_n D9    # B43

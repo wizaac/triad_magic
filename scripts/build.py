@@ -25,10 +25,24 @@ os.makedirs(BUILD, exist_ok=True)
 
 SIM_BUILD = "./sim_build"
 
+deps = {
+   "spi_master":     ["hdl/spi_master.v"],
+   "display_driver": ["hdl/spi_master.v",
+                      "hdl/shared_rom.v",
+                      "hdl/display_driver.v"],
+   "display_top":    ["hdl/spi_master.v",
+                      "hdl/shared_rom.v",
+                      "hdl/display_driver.v",
+                      "hdl/display_top.v"],
+   "blinky":         ["hdl/blinky.v"],
+}
+
+src_files = " ".join(deps.get(top, [f"{SRC}/{top}.v"]))
+
 # Questa simulation commands
 vlog_cmd = (f"vlog -sv -work {SIM_BUILD}/work "
             f"-createlib "
-            f"{SRC}/{top}.v {TBS}/{top}_tb.v "
+            f"{src_files} {TBS}/{top}_tb.v "
             f"-l {SIM_BUILD}/vlog_{top}.log")
 
 vopt_cmd = (f"vopt {top}_tb "
@@ -52,7 +66,8 @@ if args.wave:
                 f"-l {SIM_BUILD}/vsim_{top}.log")
 
 synth_cmd = (f"yosys -p 'synth_ice40 -top {top} -json {BUILD}/{top}.json' "
-             f"{SRC}/{top}.v")
+             f"{src_files}")
+
 pnr_cmd   = (f"nextpnr-ice40 --{DEVICE} --package {PACKAGE} "
              f"--json {BUILD}/{top}.json "
              f"--pcf {PCF} --asc {BUILD}/{top}.asc")
@@ -94,5 +109,11 @@ if args.all or args.pnr:
     os.system(pack_cmd)
 
 if args.all or args.prog:
-    print("=== Programming ===")
-    os.system(prog_cmd)
+    bin_path = f"{BUILD}/{top}.bin"
+    if os.path.exists(bin_path):
+        print("=== Pushing bitstream to git ===")
+        os.system(f"git add {bin_path}")
+        os.system(f"git commit -m 'build: {top} bitstream'")
+        os.system(f"git push")
+    else:
+        print(f"No bin file found at {bin_path}, skipping push")

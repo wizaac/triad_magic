@@ -1,0 +1,36 @@
+set_io clk    P7
+set_io rst_n  P8
+set_io led[0] J11
+set_io led[1] K11
+set_io led[2] K12
+set_io led[3] K14
+set_io led[4] L12
+set_io led[5] L14
+set_io led[6] M12
+set_io led[7] N14
+
+# IOL bank (Cu V2 Bank A / Br physical Bank B connector)
+set_io iol_2a   B1
+set_io iol_2b   C1
+set_io iol_4a   C3
+set_io iol_4b   D3
+set_io iol_5a   D1
+set_io iol_5b   E1
+set_io iol_8a   D4
+set_io iol_8b   E4
+set_io iol_9a   F4
+set_io iol_9b   F3
+set_io iol_10a  H4
+set_io iol_10b  G4
+set_io iol_12a  J3
+set_io iol_12b  J1
+set_io iol_13a  G3
+set_io iol_13b  G1
+set_io iol_14a  H1
+set_io iol_14b  H3
+set_io iol_18a  K3
+set_io iol_18b  K4
+set_io iol_23a  L1
+set_io iol_23b  M1
+set_io iol_25a  N1
+set_io iol_25b  P1

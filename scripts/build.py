@@ -10,11 +10,15 @@ parser.add_argument("-all",    action="store_true")
 parser.add_argument("-clean",  action="store_true")
 parser.add_argument("-sim", action="store_true", help="Run simulation in Questa")
 parser.add_argument("-wave", action="store_true", help="Open waveform viewer")
+parser.add_argument("-pcf", type=str, default="alchitry_cu.pcf")
+
+
 args = parser.parse_args()
 
+
+PCF = args.pcf
 DEVICE  = "hx8k"
 PACKAGE = "cb132"
-PCF     = "alchitry_cu.pcf"
 BUILD   = "./build"
 SRC     = "./hdl"
 TBS     = "./tbs"
@@ -34,7 +38,12 @@ deps = {
                       "hdl/shared_rom.v",
                       "hdl/display_driver.v",
                       "hdl/display_top.v"],
+	"pin_test": 		["hdl/pin_test.v"],
    "blinky":         ["hdl/blinky.v"],
+	"pin_test_bankb": ["hdl/pin_test_bankb.v"],
+	"pin_test_banka": ["hdl/pin_test_banka.v"],
+	"pin_test_individual": ["hdl/pin_test_individual.v"],
+	"pin_test_all": ["hdl/pin_test_all.v"],
 }
 
 src_files = " ".join(deps.get(top, [f"{SRC}/{top}.v"]))

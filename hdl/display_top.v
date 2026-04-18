@@ -87,10 +87,22 @@ module display_top (
    reg [3:0]  root_idx;    // 0-11
    reg [2:0]  qual_idx;    // 0-5
    reg [26:0] delay_cnt;   // ~1 second at 100MHz
+// ── Aliveness counter ─────────────────────────────────────────
+// Two LEDs count 00→01→10→11→00 at ~0.75Hz so we can confirm
+// the FPGA is running and the bitstream loaded correctly
+reg [26:0] alive_cnt;
 
-   // expose current root and quality on LEDs for debug
-   assign led = {1'b0, qual_idx, root_idx};
+always @(posedge clk or negedge rst_n) begin
+   if (!rst_n)
+      alive_cnt <= 0;
+   else
+      alive_cnt <= alive_cnt + 1;
+end
 
+// top 2 bits of 27-bit counter at 100MHz
+// 2^25 = 33M cycles = 0.33s per step, full cycle ~1.3s
+assign led[7:2] = 6'b0;
+assign led[1:0] = alive_cnt[26:25];
    // probe display driver state to know when init is done
    wire [3:0] disp_state = disp.state;
    localparam ST_IDLE = 4'd5;

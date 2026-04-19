@@ -38,12 +38,19 @@ deps = {
                       "hdl/shared_rom.v",
                       "hdl/display_driver.v",
                       "hdl/display_top.v"],
+   "display_scroll_test":    ["hdl/spi_master.v",
+                      "hdl/shared_rom.v",
+                      "hdl/display_scroll_test.v",
+                      "hdl/display_driver.v",
+                      "hdl/display_top.v"],
 	"pin_test": 		["hdl/pin_test.v"],
    "blinky":         ["hdl/blinky.v"],
 	"pin_test_bankb": ["hdl/pin_test_bankb.v"],
 	"pin_test_banka": ["hdl/pin_test_banka.v"],
 	"pin_test_individual": ["hdl/pin_test_individual.v"],
 	"pin_test_all": ["hdl/pin_test_all.v"],
+   # --- pin identification sweeps ---
+   "pin_sweep":    ["hdl/pin_sweep.v"],
 }
 
 src_files = " ".join(deps.get(top, [f"{SRC}/{top}.v"]))

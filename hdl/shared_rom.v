@@ -30,6 +30,8 @@ module shared_rom (
    // quality bitmaps: solid fill so regions are distinguishable
 	initial begin
 	   $readmemh("rom_init.hex", mem);
+    $display("shared_rom: mem[0]=%02X mem[1]=%02X mem[2304]=%02X", 
+             mem[0], mem[1], mem[2304]);
 	end
 
    // wishbone port

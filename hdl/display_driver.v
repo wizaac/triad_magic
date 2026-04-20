@@ -9,7 +9,7 @@ module display_driver #(
    // System
    input  wire        clk,
    input  wire        rst_n,
-
+	output wire [7:0]  testbus,
    // Wishbone slave
    input  wire        wb_cyc,
    input  wire        wb_stb,
@@ -19,14 +19,12 @@ module display_driver #(
    output reg  [7:0]  wb_rdat,
    output reg         wb_ack,
 
+	output reg 		 oled_rst_n,
+   output wire        oled_dc,
    // SPI physical pins
    output wire        spi_sclk,
    output wire        spi_mosi,
    output wire        spi_cs_n,
-
-   // SSD1306 control pins
-   output reg         oled_dc,
-   output reg         oled_rst_n,
 
    // Shared ROM interface (read port)
    output reg  [11:0] rom_addr,
@@ -65,6 +63,8 @@ module display_driver #(
    // Reset timing
    localparam RESET_PULSE_CYC = 24'd1000;       // ~10us at 100MHz
    localparam RESET_WAIT_CYC  = 24'd10_000_000; // 100ms at 100MHz
+   // Reset timing
+
 
    // Address command sequence length
    localparam ADDR_CMD_LEN    = 4'd6;
@@ -86,8 +86,8 @@ module display_driver #(
    // ── SPI master wishbone signals ───────────────────────────────
    reg        spi_wb_cyc, spi_wb_stb, spi_wb_we;
    reg  [1:0] spi_wb_addr;
-   reg  [7:0] spi_wb_wdat;
-   wire [7:0] spi_wb_rdat;
+   reg  [8:0] spi_wb_wdat;
+   wire [8:0] spi_wb_rdat;
    wire       spi_wb_ack;
    wire       spi_miso;
 
@@ -97,6 +97,9 @@ module display_driver #(
 
    // ── SPI master instantiation ──────────────────────────────────
    spi_master #(
+      .DEVICE     ("SSD1306"),
+      .USE_DC     (1),
+      .WB_WIDTH   (9),
       .CLK_DIV    (CLK_DIV),
       .FIFO_DEPTH (16)
    ) spi (
@@ -112,6 +115,7 @@ module display_driver #(
       .sclk     (spi_sclk),
       .mosi     (spi_mosi),
       .miso     (spi_miso),
+      .dc       (oled_dc),
       .cs_n     (spi_cs_n)
    );
    assign spi_miso = 1'b0;
@@ -197,6 +201,7 @@ module display_driver #(
    localparam ST_ADDR_WAIT  = 4'd7;
    localparam ST_COPY       = 4'd8;
    localparam ST_COPY_WAIT  = 4'd9;
+   localparam ST_COPY_PRIME  = 4'd10;
 
    reg [3:0]  state;
    reg [7:0]  init_idx;
@@ -208,7 +213,7 @@ module display_driver #(
 
    // ── SPI write/idle tasks ──────────────────────────────────────
    task spi_write_byte;
-      input [7:0] data;
+      input [8:0] data;
       begin
          spi_wb_cyc  <= 1;
          spi_wb_stb  <= 1;
@@ -226,14 +231,15 @@ module display_driver #(
       end
    endtask
 
+	assign testbus = {state, qual_dirty, root_dirty,rst_n,clk};
+
    // ── Main FSM ──────────────────────────────────────────────────
    always @(posedge clk or negedge rst_n) begin
       if (!rst_n) begin
          state          <= ST_RESET;
          oled_rst_n     <= 0;
-         oled_dc        <= 0;
-         root           <= 8'd0;
-         quality        <= 3'd0;
+         root           <= 8'h00;
+         quality        <= 3'h0;
          root_dirty     <= 1;
          qual_dirty     <= 1;
          current_region <= REGION_ROOT;
@@ -289,7 +295,7 @@ module display_driver #(
             ST_RESET: begin
                oled_rst_n <= 0;
                wait_cnt   <= wait_cnt + 1;
-               if (wait_cnt == RESET_PULSE_CYC) begin
+               if (wait_cnt >= RESET_PULSE_CYC) begin
                   oled_rst_n <= 1;
                   wait_cnt   <= 0;
                   state      <= ST_RESET_WAIT;
@@ -298,7 +304,7 @@ module display_driver #(
 
             ST_RESET_WAIT: begin
                wait_cnt <= wait_cnt + 1;
-               if (wait_cnt == RESET_WAIT_CYC) begin
+               if (wait_cnt >= RESET_WAIT_CYC) begin
                   wait_cnt <= 0;
                   init_idx <= 0;
                   state    <= ST_INIT;
@@ -308,8 +314,7 @@ module display_driver #(
 				ST_INIT: begin
 				   if (!spi_wb_cyc) begin
 				      if (init_idx < INIT_LEN) begin
-				         oled_dc  <= cur_init_byte[8];
-				         spi_write_byte(cur_init_byte[7:0]);
+				         spi_write_byte(cur_init_byte);
 				         init_idx <= init_idx + 1;
 				         state    <= ST_INIT_WAIT;
 				      end else begin
@@ -331,14 +336,12 @@ module display_driver #(
                   rom_base       <= NOTE_ROM_BASE + (root * NOTE_BYTES);
                   copy_len       <= NOTE_BYTES;
                   root_dirty     <= 0;
-                  addr_idx       <= 0;
                   state          <= ST_ADDR_CMD;
                end else if (qual_dirty) begin
                   current_region <= REGION_QUAL;
                   rom_base       <= QUAL_ROM_BASE + (quality * QUAL_BYTES);
                   copy_len       <= QUAL_BYTES;
                   qual_dirty     <= 0;
-                  addr_idx       <= 0;
                   state          <= ST_ADDR_CMD;
                end
             end
@@ -347,20 +350,18 @@ module display_driver #(
 				ST_ADDR_CMD: begin
 				   if (!spi_wb_cyc) begin
 				      if (addr_idx < ADDR_CMD_LEN) begin
-				         oled_dc  <= cur_addr_byte[8];
-				         spi_write_byte(cur_addr_byte[7:0]);
+				         spi_write_byte(cur_addr_byte);
 				         addr_idx <= addr_idx + 1;
 				         state    <= ST_ADDR_WAIT;
 				      end else begin
-				         oled_dc  <= 1;
+				         addr_idx <= 0;
 				         copy_idx <= 0;
 				         rom_en   <= 1;
 				         rom_addr <= rom_base;
-				         state    <= ST_COPY;
+				         state    <= ST_COPY_PRIME;
 				      end
 				   end
 				end
-
 
             ST_ADDR_WAIT: begin
                if (spi_wb_ack) begin
@@ -369,10 +370,15 @@ module display_driver #(
                end
             end
 
+				// ST_COPY_PRIME:
+				ST_COPY_PRIME: begin
+				    state <= ST_COPY;  // rom_data now valid
+				end
+
             ST_COPY: begin
                if (!spi_wb_cyc) begin
                   if (copy_idx < copy_len) begin
-                     spi_write_byte(rom_data);
+                     spi_write_byte({1'b1,rom_data});
                      copy_idx <= copy_idx + 1;
                      if (copy_idx + 1 < copy_len)
                         rom_addr <= rom_base + copy_idx + 1;
@@ -385,7 +391,6 @@ module display_driver #(
                   end
                end
             end
-
             ST_COPY_WAIT: begin
                if (spi_wb_ack) begin
                   spi_idle();

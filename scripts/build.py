@@ -23,9 +23,10 @@ BUILD   = "./build"
 SRC     = "./hdl"
 TBS     = "./tbs"
 top     = args.target
-
+WAVES = "./waves"
+os.makedirs(WAVES, exist_ok=True)
 os.makedirs(BUILD, exist_ok=True)
-
+TM = os.environ.get('TM', os.path.dirname(os.path.abspath(__file__)))
 
 SIM_BUILD = "./sim_build"
 
@@ -58,7 +59,7 @@ src_files = " ".join(deps.get(top, [f"{SRC}/{top}.v"]))
 # Questa simulation commands
 vlog_cmd = (f"vlog -sv -work {SIM_BUILD}/work "
             f"-createlib "
-            f"{src_files} {TBS}/{top}_tb.v "
+            f"{src_files} {TBS}/{top}_tb.sv "
             f"-l {SIM_BUILD}/vlog_{top}.log")
 
 vopt_cmd = (f"vopt {top}_tb "
@@ -72,15 +73,19 @@ vsim_cmd = (f"vsim {top}_tb_opt "
             f"-work {SIM_BUILD}/work "
             f"-c -do 'run -all; quit' "
             f"-l {SIM_BUILD}/vsim_{top}.log")
-
 if args.wave:
+    wave_do = f"waves/{top}.do"
+    if os.path.exists(wave_do):
+        do_str = f"do {wave_do};"
+    else:
+        do_str = ""
     vsim_cmd = (f"vsim {top}_tb_opt "
                 f"-work {SIM_BUILD}/work "
-                f"-visualizer "
-                f"+designfile+{SIM_BUILD}/{top}.bin "
-                f"-do 'add wave -r /*; run -all' "
+                f"-visualizer={SIM_BUILD}/{top}.bin "
+                f"-qwavedb=+signal+wavedir=waves+wavefile={top}.qwavedb "
+                f"-voptargs=+acc "
+                f"-do '{do_str} log -r /*' "
                 f"-l {SIM_BUILD}/vsim_{top}.log")
-
 synth_cmd = (f"yosys -p 'synth_ice40 -top {top} -json {BUILD}/{top}.json' "
              f"{src_files}")
 
@@ -93,6 +98,7 @@ prog_cmd  = f"iceprog {BUILD}/{top}.bin"
 if args.clean:
     os.system(f"rm -rf {BUILD}/*")
     print("Build directory cleaned")
+
 
 if args.sim:
     os.makedirs(SIM_BUILD, exist_ok=True)
@@ -107,8 +113,7 @@ if args.sim:
         print("vopt failed!")
         exit(1)
     print("=== Simulating ===")
-    os.system(vsim_cmd)
-
+    os.system(f"cd {TM} && {vsim_cmd}")  # ensure cwd is project root for $readmemh
 if args.all or args.synth:
     print("=== Synthesizing ===")
     ret = os.system(synth_cmd)

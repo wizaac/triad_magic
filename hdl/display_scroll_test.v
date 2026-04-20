@@ -9,7 +9,7 @@ module display_scroll_test #(
    parameter CLK_DIV = 5    // 100MHz / (2*5) = 10MHz SPI
 )(
    input  wire       clk,        // 100MHz system clock
-   input  wire       rst_n,      // active-low reset (CU button)
+   input  wire       pin_rst_n,      // active-low reset (CU button)
 
    // OLED SPI — names match PCF board signal names
    output wire       OLED_SDI,   // MOSI  purple  C1
@@ -21,6 +21,22 @@ module display_scroll_test #(
    // Debug LEDs on CU board
    output wire [7:0] led
 );
+// Power-on reset stretcher
+// iCE40 initialises all regs to 0, so por_count starts at 0
+// rst_n stays low until counter reaches max, then releases high
+reg [7:0] por_count = 8'h00;
+wire rst_n;
+
+always @(posedge clk) begin
+    if (!pin_rst_n)
+        por_count <= 8'h00;
+    else if (!(&por_count))  // count up until all ones
+        por_count <= por_count + 1;
+end
+
+assign rst_n = &por_count;  // high only when counter is 0xFF
+
+
 
    // ── ROM interface ─────────────────────────────────────────────
    wire [11:0] rom_addr;
@@ -54,6 +70,7 @@ module display_scroll_test #(
    ) disp (
       .clk        (clk),
       .rst_n      (rst_n),
+		.testbus    (disp_testbus),
       .wb_cyc     (wb_cyc),
       .wb_stb     (wb_stb),
       .wb_we      (wb_we),
@@ -74,13 +91,30 @@ module display_scroll_test #(
    // ── Alive counter — LEDs[1:0] tick at ~0.75 Hz ───────────────
    // Gives instant visual confirmation the bitstream loaded and
    // the clock is running before the display finishes init
+
+	wire [7:0] disp_testbus;
    reg [26:0] alive_cnt;
-   always @(posedge clk or negedge rst_n)
+   always @(posedge slow_clk or negedge rst_n)begin
       if (!rst_n) alive_cnt <= 0;
       else        alive_cnt <= alive_cnt + 1;
+	end
 
-   assign led[7:2] = 6'b0;
-   assign led[1:0] = alive_cnt[26:25]; // ~0.33s per step, full cycle ~1.3s
+assign led = disp_testbus;
+
+reg [26:0] slow_cnt;
+reg        slow_clk;
+
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        slow_cnt <= 0;
+        slow_clk <= 0;
+    end else if (slow_cnt == 27'd2_499_999) begin
+        slow_cnt <= 0;
+        slow_clk <= ~slow_clk;
+    end else begin
+        slow_cnt <= slow_cnt + 1;
+    end
+end
 
    // ── Test sequencer ────────────────────────────────────────────
    // Waits for display init + initial dirty renders to finish,

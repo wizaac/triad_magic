@@ -19,7 +19,7 @@
 # Bank B row 1 col 7 not connected (Br B40 has no Cu V2 mapping).
 
 set_io clk   P7
-set_io rst_n P8
+set_io pin_rst_n P8
 
 set_io led[0] J11
 set_io led[1] K11

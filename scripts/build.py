@@ -86,9 +86,10 @@ if args.wave:
                 f"-voptargs=+acc "
                 f"-do '{do_str} log -r /*' "
                 f"-l {SIM_BUILD}/vsim_{top}.log")
-synth_cmd = (f"yosys -p 'synth_ice40 -top {top} -json {BUILD}/{top}.json' "
-             f"{src_files}")
 
+synth_cmd = (f"yosys -p 'synth_ice40 -top {top} -json {BUILD}/{top}.json' "
+             f"-l {BUILD}/{top}_synth.log "
+             f"{src_files}")
 pnr_cmd   = (f"nextpnr-ice40 --{DEVICE} --package {PACKAGE} "
              f"--json {BUILD}/{top}.json "
              f"--pcf {PCF} --asc {BUILD}/{top}.asc")

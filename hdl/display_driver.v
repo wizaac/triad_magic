@@ -39,24 +39,24 @@ module display_driver #(
    //   Root:    left  half — cols 32-63,  pages 0-5 (32x48px)
    //   Quality: right half — cols 96-127, pages 3-5 (32x24px)
    //   Debug:   right half — cols 96-127, pages 0-2 (32x24px)
-   localparam COL_ROOT_START  = 8'h20;  // col 32
-   localparam COL_ROOT_END    = 8'h3F;  // col 63
-   localparam COL_RIGHT_START = 8'h60;  // col 96
-   localparam COL_RIGHT_END   = 8'h7F;  // col 127
-   localparam PAGE_TOP        = 8'h00;  // page 0
-   localparam PAGE_MID        = 8'h03;  // page 3
-   localparam PAGE_BOT        = 8'h05;  // page 5
 
-   // Bitmap sizes in bytes
-   localparam NOTE_BYTES      = 11'd192; // 32 cols x 6 pages
-   localparam QUAL_BYTES      = 11'd96;  // 32 cols x 3 pages
-   localparam DEBUG_BYTES     = 11'd96;  // 32 cols x 3 pages
+localparam COL_NOTE_START  = 8'h20;  // col 32
+localparam COL_NOTE_END    = 8'h38;  // col 56  (25 cols)
+localparam COL_RIGHT_START = 8'h39;  // col 57
+localparam COL_RIGHT_END   = 8'h5F;  // col 95  (39 cols)
+localparam PAGE_TOP        = 8'h00;
+localparam PAGE_ADC_END    = 8'h01;  // ADC pages 0-3
+localparam PAGE_QUAL_START = 8'h02;  // quality pages 4-5
+localparam PAGE_BOT        = 8'h05;
 
-   // ROM layout
-   localparam NOTE_ROM_BASE   = 12'd0;    // 12 notes * 192 = 2304 bytes
-   localparam QUAL_ROM_BASE   = 12'd2304; // 6 qualities * 96 = 576 bytes
-   localparam DEBUG_ROM_BASE  = 12'd2880; // debug region (if needed)
+localparam NOTE_BYTES      = 11'd150;  // 25 cols x 6 pages
+localparam QUAL_BYTES      = 11'd156;   // 39 cols x 2 pages
+localparam NOTE_ROM_BASE   = 12'h000;
+localparam QUAL_ROM_BASE   = 12'h708;
 
+localparam REGION_NOTE  = 2'd0;
+localparam REGION_QUAL  = 2'd1;
+localparam REGION_ADC   = 2'd2;
    // Init sequence length
    localparam INIT_LEN        = 8'd24;   // 23 init bytes + display on
 
@@ -69,10 +69,38 @@ module display_driver #(
    // Address command sequence length
    localparam ADDR_CMD_LEN    = 4'd6;
 
-   // ── Region select encoding ────────────────────────────────────
-   localparam REGION_ROOT  = 2'd0;
-   localparam REGION_QUAL  = 2'd1;
-   localparam REGION_DEBUG = 2'd2;
+
+	// Hex digit font: 16 glyphs × 5 cols × 1 page (5 bytes each = 80 bytes)
+	// Bit0 = top pixel, 5-wide × 7-tall glyphs in an 8-row page
+
+	function [7:0] hex_col;
+   input [3:0] digit;
+   input [2:0] col;   // 0-4
+   reg [39:0] cols;   // 5 bytes for this digit
+   begin
+      case (digit)
+         4'h0: cols = 40'h3E_41_41_41_3E;
+         4'h1: cols = 40'h00_02_7F_00_00;
+         4'h2: cols = 40'h43_61_51_49_47;
+         4'h3: cols = 40'h43_41_41_41_3F;
+         4'h4: cols = 40'h1F_08_08_08_7F;
+         4'h5: cols = 40'h4F_49_49_49_71;
+         4'h6: cols = 40'h3E_49_49_49_30;
+         4'h7: cols = 40'h07_01_71_09_07;
+         4'h8: cols = 40'h36_49_49_49_36;
+         4'h9: cols = 40'h4F_49_49_49_7F;
+         4'hA: cols = 40'h7E_09_09_09_7E;
+         4'hB: cols = 40'h7F_49_49_49_36;
+         4'hC: cols = 40'h7F_41_41_41_00;
+         4'hD: cols = 40'h7F_41_41_22_1C;
+         4'hE: cols = 40'h7F_49_49_49_41;
+         4'hF: cols = 40'h7F_09_09_09_01;
+         default: cols = 40'h0;
+      endcase
+      // cols[39:32]=col0, cols[31:24]=col1 ... cols[7:0]=col4
+      hex_col = cols[39 - (col * 8) -: 8];
+   end
+endfunction
 
    // ── Internal registers ────────────────────────────────────────
    reg [7:0] root;
@@ -158,38 +186,104 @@ module display_driver #(
    // ── Address command lookup ────────────────────────────────────
    // Returns {dc, byte} for each of the 6 address setup commands
    // given the current region being updated
-   function [8:0] addr_byte;
-      input [1:0] region;
-      input [3:0] idx;
-      case ({region, idx})
-         // Root region: cols 32-63, pages 0-5
-         {REGION_ROOT, 4'd0}: addr_byte = {1'b0, 8'h21};          // set col addr
-         {REGION_ROOT, 4'd1}: addr_byte = {1'b0, COL_ROOT_START};  // start col
-         {REGION_ROOT, 4'd2}: addr_byte = {1'b0, COL_ROOT_END};    // end col
-         {REGION_ROOT, 4'd3}: addr_byte = {1'b0, 8'h22};          // set page addr
-         {REGION_ROOT, 4'd4}: addr_byte = {1'b0, PAGE_TOP};        // start page
-         {REGION_ROOT, 4'd5}: addr_byte = {1'b0, PAGE_BOT};        // end page
+// OLD cases used REGION_ROOT/QUAL/DEBUG with old col constants
+// NEW — same structure, new constants and region names
 
-         // Quality region: cols 96-127, pages 3-5
-         {REGION_QUAL, 4'd0}: addr_byte = {1'b0, 8'h21};
-         {REGION_QUAL, 4'd1}: addr_byte = {1'b0, COL_RIGHT_START};
-         {REGION_QUAL, 4'd2}: addr_byte = {1'b0, COL_RIGHT_END};
-         {REGION_QUAL, 4'd3}: addr_byte = {1'b0, 8'h22};
-         {REGION_QUAL, 4'd4}: addr_byte = {1'b0, PAGE_MID};
-         {REGION_QUAL, 4'd5}: addr_byte = {1'b0, PAGE_BOT};
+function [8:0] addr_byte;
+   input [1:0] region;
+   input [3:0] idx;
+   case ({region, idx})
+      // NOTE: cols 32-56, pages 0-5
+      {REGION_NOTE, 4'd0}: addr_byte = {1'b0, 8'h21};
+      {REGION_NOTE, 4'd1}: addr_byte = {1'b0, COL_NOTE_START};
+      {REGION_NOTE, 4'd2}: addr_byte = {1'b0, COL_NOTE_END};
+      {REGION_NOTE, 4'd3}: addr_byte = {1'b0, 8'h22};
+      {REGION_NOTE, 4'd4}: addr_byte = {1'b0, PAGE_TOP};
+      {REGION_NOTE, 4'd5}: addr_byte = {1'b0, PAGE_BOT};
 
-         // Debug region: cols 96-127, pages 0-2
-         {REGION_DEBUG, 4'd0}: addr_byte = {1'b0, 8'h21};
-         {REGION_DEBUG, 4'd1}: addr_byte = {1'b0, COL_RIGHT_START};
-         {REGION_DEBUG, 4'd2}: addr_byte = {1'b0, COL_RIGHT_END};
-         {REGION_DEBUG, 4'd3}: addr_byte = {1'b0, 8'h22};
-         {REGION_DEBUG, 4'd4}: addr_byte = {1'b0, PAGE_TOP};
-         {REGION_DEBUG, 4'd5}: addr_byte = {1'b0, PAGE_MID - 1};  // end page 2
+      // QUALITY: cols 57-95, pages 4-5
+      {REGION_QUAL, 4'd0}: addr_byte = {1'b0, 8'h21};
+      {REGION_QUAL, 4'd1}: addr_byte = {1'b0, COL_RIGHT_START};
+      {REGION_QUAL, 4'd2}: addr_byte = {1'b0, COL_RIGHT_END};
+      {REGION_QUAL, 4'd3}: addr_byte = {1'b0, 8'h22};
+      {REGION_QUAL, 4'd4}: addr_byte = {1'b0, PAGE_QUAL_START};
+      {REGION_QUAL, 4'd5}: addr_byte = {1'b0, PAGE_BOT};
 
-         default: addr_byte = {1'b0, 8'hE3}; // NOP
-      endcase
-   endfunction
+      // ADC: cols 57-95, pages 0-3
+      {REGION_ADC,  4'd0}: addr_byte = {1'b0, 8'h21};
+      {REGION_ADC,  4'd1}: addr_byte = {1'b0, COL_RIGHT_START};
+      {REGION_ADC,  4'd2}: addr_byte = {1'b0, COL_RIGHT_END};
+      {REGION_ADC,  4'd3}: addr_byte = {1'b0, 8'h22};
+      {REGION_ADC,  4'd4}: addr_byte = {1'b0, PAGE_TOP};
+      {REGION_ADC,  4'd5}: addr_byte = {1'b0, PAGE_ADC_END};
 
+      default: addr_byte = {1'b0, 8'hE3};
+   endcase
+endfunction
+// Add alongside existing root/quality/root_dirty/qual_dirty:
+reg        adc_dirty;
+reg [7:0] adc_ch [0:3];
+reg [1:0]  adc_pg;
+reg [5:0]  adc_col;
+reg        adc_done;
+
+
+// Grid mapping:
+//   pages 0-1, cols  0-18 : ch0   (top-left)
+//   pages 0-1, cols 20-38 : ch1   (top-right)
+//   pages 2-3, cols  0-18 : ch2   (bottom-left)
+//   pages 2-3, cols 20-38 : ch3   (bottom-right)
+//
+// Each cell: 2 digits × 5 cols = 10 cols, 
+//   left-padded by 4 cols so digits sit centered in 19-col half
+// Col 19 is a blank separator between left and right cells
+
+function [7:0] adc_byte;
+   input [1:0] pg;
+   input [5:0] col;
+   reg [7:0]  chval;
+   reg [3:0]  nibble;
+   reg [5:0]  cell_col;   // col within the 19-col cell (0-18)
+   reg        right_cell;
+   reg [2:0]  digit_idx;
+   reg [2:0]  col_in_digit;
+   begin
+      // col 19 is always blank separator
+      if (col == 6'd19) begin
+         adc_byte = 8'h00;
+      end else begin
+         right_cell = (col >= 6'd20);
+         cell_col   = right_cell ? (col - 6'd20) : col;
+
+         // channel select: top half = ch0/ch1, bottom half = ch2/ch3
+         case ({pg[0], right_cell})
+            2'b00: chval = adc_ch[0];
+            2'b01: chval = adc_ch[1];
+            2'b10: chval = adc_ch[2];
+            2'b11: chval = adc_ch[3];
+         endcase
+
+         // 4px left pad then 2 digits (10 cols), rest blank
+         // cols 0-3   : blank pad
+         // cols 4-8   : digit 0 (high nibble), 5 cols
+         // cols 9-13  : digit 1 (low nibble),  5 cols
+         // cols 14-18 : blank pad
+         if (cell_col < 6'd4 || cell_col >= 6'd14) begin
+            adc_byte = 8'h00;
+         end else begin
+            digit_idx    = (cell_col < 6'd9) ? 3'd0 : 3'd1;
+            col_in_digit = (cell_col < 6'd9) ? (cell_col - 6'd4)
+                                              : (cell_col - 6'd9);
+            nibble   = (digit_idx == 0) ? chval[7:4] : chval[3:0];
+            adc_byte = hex_col(nibble, col_in_digit[2:0]);
+         end
+      end
+   end
+endfunction
+
+// Add to state localparam block:
+localparam ST_ADC_COPY   = 4'd11;
+localparam ST_ADC_WAIT   = 4'd12;
    // ── State machine states ──────────────────────────────────────
    localparam ST_RESET      = 4'd0;
    localparam ST_RESET_WAIT = 4'd1;
@@ -231,7 +325,7 @@ module display_driver #(
       end
    endtask
 
-	assign testbus = {state, qual_dirty, root_dirty,rst_n,clk};
+	assign testbus = {state, qual_dirty, root_dirty,adc_dirty,1'b0};
 
    // ── Main FSM ──────────────────────────────────────────────────
    always @(posedge clk or negedge rst_n) begin
@@ -242,7 +336,7 @@ module display_driver #(
          quality        <= 3'h0;
          root_dirty     <= 1;
          qual_dirty     <= 1;
-         current_region <= REGION_ROOT;
+         current_region <= REGION_NOTE;
          init_idx       <= 0;
          copy_idx       <= 0;
          copy_len       <= 0;
@@ -258,6 +352,14 @@ module display_driver #(
          spi_wb_wdat    <= 0;
          wb_ack         <= 0;
          wb_rdat        <= 0;
+			adc_dirty      <= 1;
+			adc_pg         <= 0;
+			adc_col        <= 0;
+			adc_done       <= 0;
+			adc_ch[0]      <= 8'hDE;
+			adc_ch[1]      <= 8'hAD;
+			adc_ch[2]      <= 8'hBE;
+			adc_ch[3]      <= 8'hEF;
       end else begin
 
          if (spi_wb_ack) spi_idle();
@@ -280,6 +382,11 @@ module display_driver #(
                         qual_dirty <= 1;
                      end
                   end
+						// Add to existing case (wb_addr) inside wb_we block:
+						8'h02: begin adc_ch[0] <= wb_wdat; adc_dirty <= 1; end
+						8'h03: begin adc_ch[1] <= wb_wdat; adc_dirty <= 1; end
+						8'h04: begin adc_ch[2] <= wb_wdat; adc_dirty <= 1; end
+						8'h05: begin adc_ch[3] <= wb_wdat; adc_dirty <= 1; end
                endcase
             end else begin
                case (wb_addr)
@@ -330,20 +437,27 @@ module display_driver #(
                end
             end
 
-            ST_IDLE: begin
-               if (root_dirty) begin
-                  current_region <= REGION_ROOT;
-                  rom_base       <= NOTE_ROM_BASE + (root * NOTE_BYTES);
-                  copy_len       <= NOTE_BYTES;
-                  root_dirty     <= 0;
-                  state          <= ST_ADDR_CMD;
-               end else if (qual_dirty) begin
-                  current_region <= REGION_QUAL;
-                  rom_base       <= QUAL_ROM_BASE + (quality * QUAL_BYTES);
-                  copy_len       <= QUAL_BYTES;
-                  qual_dirty     <= 0;
-                  state          <= ST_ADDR_CMD;
-               end
+				ST_IDLE: begin
+				   if (root_dirty) begin
+				      current_region <= REGION_NOTE;
+				      rom_base       <= NOTE_ROM_BASE + (root[3:0] * NOTE_BYTES);
+				      copy_len       <= NOTE_BYTES;
+				      root_dirty     <= 0;
+				      addr_idx       <= 0;
+				      state          <= ST_ADDR_CMD;
+				   end else if (qual_dirty) begin
+				      current_region <= REGION_QUAL;
+				      rom_base       <= QUAL_ROM_BASE + ({9'b0, quality} * QUAL_BYTES);
+				      copy_len       <= QUAL_BYTES;
+				      qual_dirty     <= 0;
+				      addr_idx       <= 0;
+				      state          <= ST_ADDR_CMD;
+				   end else if (adc_dirty) begin
+				      current_region <= REGION_ADC;
+				      adc_dirty      <= 0;
+				      addr_idx       <= 0;
+				      state          <= ST_ADDR_CMD;
+				   end
             end
 
 
@@ -354,11 +468,17 @@ module display_driver #(
 				         addr_idx <= addr_idx + 1;
 				         state    <= ST_ADDR_WAIT;
 				      end else begin
-				         addr_idx <= 0;
-				         copy_idx <= 0;
-				         rom_en   <= 1;
-				         rom_addr <= rom_base;
-				         state    <= ST_COPY_PRIME;
+							addr_idx <= 0;
+							if (current_region == REGION_ADC) begin
+							   adc_pg  <= 0;
+							   adc_col <= 0;
+							   state   <= ST_ADC_COPY;
+							end else begin
+							   copy_idx <= 0;
+							   rom_en   <= 1;
+							   rom_addr <= rom_base;
+							   state    <= ST_COPY_PRIME;
+							end
 				      end
 				   end
 				end
@@ -397,7 +517,31 @@ module display_driver #(
                   state <= ST_COPY;
                end
             end
-
+				ST_ADC_COPY: begin
+				   if (!spi_wb_cyc) begin
+				      adc_done <= 0;
+				      spi_write_byte({1'b1, adc_byte(adc_pg, adc_col)});
+				      if (adc_col == 6'd38) begin
+				         adc_col <= 0;
+				         if (adc_pg == 2'd1) begin
+				            adc_done <= 1;
+				            adc_pg   <= 0;
+				         end else begin
+				            adc_pg <= adc_pg + 1;
+				         end
+				      end else begin
+				         adc_col <= adc_col + 1;
+				      end
+				      state <= ST_ADC_WAIT;
+				   end
+				end
+				
+				ST_ADC_WAIT: begin
+				   if (spi_wb_ack) begin
+				      spi_idle();
+				      state <= adc_done ? ST_IDLE : ST_ADC_COPY;
+				   end
+				end
             default: state <= ST_IDLE;
 
          endcase

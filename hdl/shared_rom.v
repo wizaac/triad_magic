@@ -23,15 +23,13 @@ module shared_rom (
    output reg  [7:0]  rd_data
 );
 
-   reg [7:0] mem [0:2879];
+   reg [7:0] mem [0:2891];
 
    // initialise with placeholder patterns
    // note bitmaps: alternating stripes so you can see something
    // quality bitmaps: solid fill so regions are distinguishable
 	initial begin
 	   $readmemh("rom_init.hex", mem);
-    $display("shared_rom: mem[0]=%02X mem[1]=%02X mem[2304]=%02X", 
-             mem[0], mem[1], mem[2304]);
 	end
 
    // wishbone port

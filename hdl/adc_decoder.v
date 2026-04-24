@@ -9,23 +9,27 @@
 //   pot[2] = spacing   → 0-11  (12 voicing presets, top 4 bits)
 //   pot[3] = length    → pulse count (16 zones, top 4 bits)
 
-module adc_decoder (
+module adc_decoder #(
+   parameter CLK_DIV = 5    // 100MHz / (2*5) = 10MHz SPI for OLED
+)(
    input  wire        clk,
    input  wire        rst_n,
-
-   // Raw pot values from adc_reader
-   input  wire [7:0]  pot_root,
-   input  wire [7:0]  pot_quality,
-   input  wire [7:0]  pot_spacing,
-   input  wire [7:0]  pot_length,
+	output wire [7:0]  testbus,
 
    // Wishbone slave
    input  wire        wb_cyc,
    input  wire        wb_stb,
    input  wire        wb_we,
    input  wire [3:0]  wb_addr,
+   input  wire [7:0]  wb_wdta,
    output reg  [7:0]  wb_rdat,
-   output reg         wb_ack
+   output reg         wb_ack,
+   // SPI physical pins
+   output wire        spi_sclk,
+   output wire        spi_mosi,
+   output wire        spi_miso,
+   output wire        spi_cs_n
+
 );
 
    // ── Quality encoding ──────────────────────────────────────────
@@ -35,101 +39,40 @@ module adc_decoder (
    localparam QUAL_MIN   = 3'd3;
    localparam QUAL_DIM   = 3'd4;
    localparam QUAL_AUG   = 3'd5;
-   // 3'd6 spare
    localparam QUAL_PWR   = 3'd7;  // all the way right = power chord
 
-   // ── Length encoding (pulse counts in 16th note units) ─────────
-   localparam LEN_REST    = 7'd0;
-   localparam LEN_16TH    = 7'd1;
-   localparam LEN_D16TH   = 7'd2;   // dotted 16th = 1.5 × 16th
-   localparam LEN_8TH     = 7'd2;   // same pulses as dotted 16th?
-   // Actually let's be precise: if pulse = 16th note then:
-   // 16th        = 1 pulse
-   // dotted 16th = 1.5 pulses — not integer, skip
-   // 8th         = 2 pulses
-   // dotted 8th  = 3 pulses
-   // quarter     = 4 pulses
-   // dotted qtr  = 6 pulses
-   // half        = 8 pulses
-   // dotted half = 12 pulses
-   // whole       = 16 pulses
-   // dotted whole= 24 pulses
-   // double whole= 32 pulses
-   // 3 bars      = 48 pulses
-   // 4 bars      = 64 pulses
+   // ── SPI master wishbone signals ───────────────────────────────
+   reg        spi_wb_cyc, spi_wb_stb, spi_wb_we;
+   reg  [1:0] spi_wb_addr;
+   reg  [8:0] spi_wb_wdat;
+   wire [8:0] spi_wb_rdat;
+   wire       spi_wb_ack;
+   wire       spi_miso;
 
-   // ── Combinational decode ──────────────────────────────────────
-   // root: top 4 bits give 0-15, clamp to 0-11
-   wire [3:0] root_zone = pot_root[7:4];
-   wire [3:0] root_out  = (root_zone > 4'd11) ? 4'd11 : root_zone;
+  // ── SPI master instantiation ──────────────────────────────────
+   spi_master #(
+      .DEVICE     ("MCP3204"),
+      .USE_DC     (0),
+      .WB_WIDTH   (8),
+      .CLK_DIV    (CLK_DIV),
+      .FIFO_DEPTH (4)
+   ) spi (
+      .clk      (clk),
+      .rst_n    (rst_n),
+      .wb_cyc   (spi_wb_cyc),
+      .wb_stb   (spi_wb_stb),
+      .wb_we    (spi_wb_we),
+      .wb_addr  (spi_wb_addr),
+      .wb_wdat  (spi_wb_wdat),
+      .wb_rdat  (spi_wb_rdat),
+      .wb_ack   (spi_wb_ack),
+      .sclk     (spi_sclk),
+      .mosi     (spi_mosi),
+      .miso     (spi_miso),
+      .dc       (oled_dc),
+      .cs_n     (spi_cs_n)
+   );
 
-   // quality: top 3 bits give 0-7 directly
-   wire [2:0] quality_out = pot_quality[7:5];
-
-   // spacing: top 4 bits give 0-15, clamp to 0-11
-   wire [3:0] spacing_zone = pot_spacing[7:4];
-   wire [3:0] spacing_out  = (spacing_zone > 4'd11) ? 4'd11 : spacing_zone;
-
-   // length: top 4 bits select from pulse count table
-   wire [3:0] length_zone = pot_length[7:4];
-   reg  [6:0] length_out;
-
-   always @(*) begin
-      case (length_zone)
-         4'd0:  length_out = 7'd0;   // rest
-         4'd1:  length_out = 7'd1;   // 16th
-         4'd2:  length_out = 7'd2;   // 8th
-         4'd3:  length_out = 7'd3;   // dotted 8th
-         4'd4:  length_out = 7'd4;   // quarter
-         4'd5:  length_out = 7'd6;   // dotted quarter
-         4'd6:  length_out = 7'd8;   // half
-         4'd7:  length_out = 7'd12;  // dotted half
-         4'd8:  length_out = 7'd16;  // whole
-         4'd9:  length_out = 7'd24;  // dotted whole
-         4'd10: length_out = 7'd32;  // double whole
-         4'd11: length_out = 7'd48;  // 3 bars
-         4'd12: length_out = 7'd64;  // 4 bars
-         4'd13: length_out = 7'd64;  // spare (4 bars)
-         4'd14: length_out = 7'd64;  // spare (4 bars)
-         4'd15: length_out = 7'd64;  // spare (4 bars)
-         default: length_out = 7'd4; // default quarter note
-      endcase
-   end
-
-   // ── Spacing displacement vector lookup ───────────────────────
-   // Each entry is {top_oct[1:0], mid_oct[1:0], root_oct[1:0]}
-   // packed into 6 bits
-   // chord engine applies: note[i] = root + interval[i] + oct[i]*12
-   reg [5:0] spacing_vec;
-
-   always @(*) begin
-      case (spacing_out)
-         4'd0:  spacing_vec = {2'd0, 2'd0, 2'd0}; // close root position
-         4'd1:  spacing_vec = {2'd0, 2'd0, 2'd1}; // first inversion
-         4'd2:  spacing_vec = {2'd0, 2'd1, 2'd1}; // second inversion
-         4'd3:  spacing_vec = {2'd1, 2'd0, 2'd0}; // open top up
-         4'd4:  spacing_vec = {2'd1, 2'd0, 2'd1}; // open first inv
-         4'd5:  spacing_vec = {2'd1, 2'd1, 2'd0}; // open second inv
-         4'd6:  spacing_vec = {2'd2, 2'd0, 2'd0}; // very open top
-         4'd7:  spacing_vec = {2'd0, 2'd1, 2'd0}; // mid up
-         4'd8:  spacing_vec = {2'd1, 2'd0, 2'd2}; // drop 2
-         4'd9:  spacing_vec = {2'd2, 2'd1, 2'd0}; // wide spread
-         4'd10: spacing_vec = {2'd2, 2'd0, 2'd1}; // pyramid
-         4'd11: spacing_vec = {2'd2, 2'd1, 2'd1}; // max spread
-         default: spacing_vec = 6'd0;
-      endcase
-   end
-
-   // ── Wishbone register map ─────────────────────────────────────
-   // 0x0: root_out    [3:0]
-   // 0x1: quality_out [2:0]
-   // 0x2: spacing_out [3:0]  voicing index
-   // 0x3: spacing_vec [5:0]  displacement vector for chord engine
-   // 0x4: length_out  [6:0]  pulse count
-   // 0x5: pot_root    [7:0]  raw (debug)
-   // 0x6: pot_quality [7:0]  raw (debug)
-   // 0x7: pot_spacing [7:0]  raw (debug)
-   // 0x8: pot_length  [7:0]  raw (debug)
 
    always @(posedge clk or negedge rst_n) begin
       if (!rst_n) begin
@@ -154,6 +97,77 @@ module adc_decoder (
                endcase
             end
          end
+reg[7:0] cmd_byte [3];//only the first five bits matter, two bytes of zero transmitted to keep the clock running.
+assign cmd_byte[1] <= 8'h00;
+assign cmd_byte[2] <= 8'h00;
+reg[11:0] adc_array [1:0]
+case(pot_reader_state)
+INIT: 
+	//No init commands need to go to the chip, go straight to start (maybe include reset delay/master init driver later)
+	pot_reader_next_state <= CHANNEL_START;// 
+
+CHANNEL_START:begin
+	bytes_sent <= 0;
+	cmd_byte[0] <= {mcp3204_start_bit, 2'b1,channel,3'b000};
+	pot_reader_next_state <= SEND_WB_CMD_BYTE;
+end
+SEND_WB_CMD_BYTE: begin
+	write_spi_wb_byte(cmd_byte[bytes_sent]);
+	pot_reader_next_state <= WAIT_ACK;
+end
+WAIT_ACK: begin
+	wait_spi_ack();
+	if(bytes_sent >= 3 )begin
+		bytes_sent = bytes_sent + 1;
+		pot_reader_next_state <= SEND_WB_CMD_BYTE;// The chip needs two bytes of do-not-care.. why not just resend the exact command 3 times?
+	end else begin
+		pot_reader_next_state <= GET_SPI_DATA;// The chip needs two bytes of do-not-care.. why not just resend the exact command 3 times?
+	end
+end
+GET_SPI_DATA:begin
+	bytes_read = 0;
+	pot_reader_next_state <= WAIT_SPI_FIFO_NOT_EMPTY;// The chip needs two bytes of do-not-care.. why not just resend the exact command 3 times?
+begin
+GET_SPI_WB_BYTE: begin
+	raw_byte = read_spi_wb_byte(rd_fifo);
+	if(bytes_read == 0)begin
+		adc_array[channel][11:8] = raw_byte[3:0];
+		pot_reader_next_state <= GET_SPI_WB_BYTE;// 
+	end else if(bytes_read == 1) begin
+		adc_array[channel][11:8] = raw_byte[3:0];
+		pot_reader_next_state <= CHANNEL_CLEANUP;// 
+	end
+end
+CHANNEL_CLEANUP:begin
+	channel <= channel + 1;//4-channels,two bits. channel select field on adc is two bits(D1,D0 in cmd byte)
+	if(channel == 0)//start of new cycle, wait for refresh to let other modules use the SPI
+		pot_reader_next_state <= WAIT_FOR_REFRESH_PERIOD;// 
+	else
+		pot_reader_next_state <= CHANNEL_START;// 		
+end
+WAIT_FOR_REFRESH_PERIOD: begin
+	downtime_counter <= downtime_counter + 1;
+	if(downtime_counter >= DOWNTIME) begin
+		pot_reader_next_state <= CHANNEL_START;// 
+	end else begin
+		pot_reader_next_state <= WAIT_FOR_REFRESH_PERIOD;
+	end
+end
+endcase
+			//Read Pot State machine
+			//init: no init sequence on SPI require
+			//IDLE: Idle is downtime between sampling rate; takes 20 bytes of SPI uptime per cycle
+			//Read Ch1
+			//Read Ch2
+			//Read Ch3
+			//Read Ch4
+			//Read is write_wb x3 ({start_bit, single-ended channel,do-not-care-bit,channel select [1:0],3'b0},8'b0.8'bo)
+			//SPI master will fill up rdfifo, so wb_read(rd_fifo) x3
+			//Loop through with a vector for channel select
+			//Burst read all 4 channels, then wait a long time to leave the bus open for other drivers
+			//explicit states for all 4 channels lets us write to specific registers in specific states,
+			//or channel select could be used as addr for a write. Case(channel_sel): 1: pot_root = spi_wb_rdata
+
       end
    end
 

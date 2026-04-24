@@ -19,7 +19,7 @@ module display_driver #(
    output reg  [7:0]  wb_rdat,
    output reg         wb_ack,
 
-	output reg 		 oled_rst_n,
+	output reg 		 	 oled_rst_n,
    output wire        oled_dc,
    // SPI physical pins
    output wire        spi_sclk,
@@ -45,12 +45,12 @@ localparam COL_NOTE_END    = 8'h38;  // col 56  (25 cols)
 localparam COL_RIGHT_START = 8'h39;  // col 57
 localparam COL_RIGHT_END   = 8'h5F;  // col 95  (39 cols)
 localparam PAGE_TOP        = 8'h00;
-localparam PAGE_ADC_END    = 8'h01;  // ADC pages 0-3
-localparam PAGE_QUAL_START = 8'h02;  // quality pages 4-5
+localparam PAGE_ADC_END    = 8'h01;  // ADC pages 0-1
+localparam PAGE_QUAL_START = 8'h02;  // reg_chord_quality pages 2-5
 localparam PAGE_BOT        = 8'h05;
 
 localparam NOTE_BYTES      = 11'd150;  // 25 cols x 6 pages
-localparam QUAL_BYTES      = 11'd156;   // 39 cols x 2 pages
+localparam QUAL_BYTES      = 11'd156;   // 39 cols x 4 pages
 localparam NOTE_ROM_BASE   = 12'h000;
 localparam QUAL_ROM_BASE   = 12'h708;
 
@@ -103,10 +103,10 @@ localparam REGION_ADC   = 2'd2;
 endfunction
 
    // ── Internal registers ────────────────────────────────────────
-   reg [7:0] root;
-   reg [2:0] quality;
-   reg       root_dirty;
-   reg       qual_dirty;
+   reg [7:0] reg_chord_root;
+   reg [2:0] reg_chord_quality;
+   reg       refresh_root_note;
+   reg       refresh_chord_quality;
    reg [1:0] current_region;
 	reg [8:0] init_byte_r;
 	reg [8:0] addr_byte_r;
@@ -220,9 +220,9 @@ function [8:0] addr_byte;
       default: addr_byte = {1'b0, 8'hE3};
    endcase
 endfunction
-// Add alongside existing root/quality/root_dirty/qual_dirty:
-reg        adc_dirty;
-reg [7:0] adc_ch [0:3];
+// Add alongside existing reg_chord_root/quality/refresh_root_note/refresh_chord_quality:
+reg        refresh_adc;
+reg [7:0] reg_adc_ch [0:3];
 reg [1:0]  adc_pg;
 reg [5:0]  adc_col;
 reg        adc_done;
@@ -257,10 +257,10 @@ function [7:0] adc_byte;
 
          // channel select: top half = ch0/ch1, bottom half = ch2/ch3
          case ({pg[0], right_cell})
-            2'b00: chval = adc_ch[0];
-            2'b01: chval = adc_ch[1];
-            2'b10: chval = adc_ch[2];
-            2'b11: chval = adc_ch[3];
+            2'b00: chval = reg_adc_ch[0];
+            2'b01: chval = reg_adc_ch[1];
+            2'b10: chval = reg_adc_ch[2];
+            2'b11: chval = reg_adc_ch[3];
          endcase
 
          // 4px left pad then 2 digits (10 cols), rest blank
@@ -297,6 +297,12 @@ localparam ST_ADC_WAIT   = 4'd12;
    localparam ST_COPY_WAIT  = 4'd9;
    localparam ST_COPY_PRIME  = 4'd10;
 
+	localparam REG_CHORD_ROOT		= 8'h00;
+	localparam REG_CHORD_QUALITY	= 8'h01;
+	localparam REG_ADC_CH_0_ADDR 	= 8'h02;
+	localparam REG_ADC_CH_1_ADDR 	= 8'h03;
+	localparam REG_ADC_CH_2_ADDR 	= 8'h04;
+	localparam REG_ADC_CH_3_ADDR 	= 8'h05;
    reg [3:0]  state;
    reg [7:0]  init_idx;
    reg [10:0] copy_idx;
@@ -325,17 +331,17 @@ localparam ST_ADC_WAIT   = 4'd12;
       end
    endtask
 
-	assign testbus = {state, qual_dirty, root_dirty,adc_dirty,1'b0};
+	assign testbus = {state, refresh_chord_quality, refresh_root_note,refresh_adc,1'b0};
 
    // ── Main FSM ──────────────────────────────────────────────────
    always @(posedge clk or negedge rst_n) begin
       if (!rst_n) begin
          state          <= ST_RESET;
          oled_rst_n     <= 0;
-         root           <= 8'h00;
-         quality        <= 3'h0;
-         root_dirty     <= 1;
-         qual_dirty     <= 1;
+         reg_chord_root           <= 8'h00;
+         reg_chord_quality        <= 3'h0;
+         refresh_root_note     <= 1;
+         refresh_chord_quality     <= 1;
          current_region <= REGION_NOTE;
          init_idx       <= 0;
          copy_idx       <= 0;
@@ -352,14 +358,14 @@ localparam ST_ADC_WAIT   = 4'd12;
          spi_wb_wdat    <= 0;
          wb_ack         <= 0;
          wb_rdat        <= 0;
-			adc_dirty      <= 1;
+			refresh_adc      <= 1;
 			adc_pg         <= 0;
 			adc_col        <= 0;
 			adc_done       <= 0;
-			adc_ch[0]      <= 8'hDE;
-			adc_ch[1]      <= 8'hAD;
-			adc_ch[2]      <= 8'hBE;
-			adc_ch[3]      <= 8'hEF;
+			reg_adc_ch[0]      <= 8'hDE;
+			reg_adc_ch[1]      <= 8'hAD;
+			reg_adc_ch[2]      <= 8'hBE;
+			reg_adc_ch[3]      <= 8'hEF;
       end else begin
 
          if (spi_wb_ack) spi_idle();
@@ -370,28 +376,28 @@ localparam ST_ADC_WAIT   = 4'd12;
             wb_ack <= 1;
             if (wb_we) begin
                case (wb_addr)
-                  8'h00: begin
-                     if (wb_wdat[3:0] != root[3:0]) begin
-                        root       <= wb_wdat;
-                        root_dirty <= 1;
+                 REG_CHORD_ROOT : begin
+                     if (wb_wdat != reg_chord_root) begin
+                        reg_chord_root       <= wb_wdat;
+                        refresh_root_note <= 1;
                      end
                   end
-                  8'h01: begin
-                     if (wb_wdat[2:0] != quality) begin
-                        quality    <= wb_wdat[2:0];
-                        qual_dirty <= 1;
+                  REG_CHORD_QUALITY: begin
+                     if (wb_wdat[2:0] != reg_chord_quality) begin
+                        reg_chord_quality    <= wb_wdat[2:0];
+                        refresh_chord_quality <= 1;
                      end
                   end
 						// Add to existing case (wb_addr) inside wb_we block:
-						8'h02: begin adc_ch[0] <= wb_wdat; adc_dirty <= 1; end
-						8'h03: begin adc_ch[1] <= wb_wdat; adc_dirty <= 1; end
-						8'h04: begin adc_ch[2] <= wb_wdat; adc_dirty <= 1; end
-						8'h05: begin adc_ch[3] <= wb_wdat; adc_dirty <= 1; end
+						REG_ADC_CH_0_ADDR: begin reg_adc_ch[0] <= wb_wdat; refresh_adc <= 1; end
+						REG_ADC_CH_1_ADDR: begin reg_adc_ch[1] <= wb_wdat; refresh_adc <= 1; end
+						REG_ADC_CH_2_ADDR: begin reg_adc_ch[2] <= wb_wdat; refresh_adc <= 1; end
+						REG_ADC_CH_3_ADDR: begin reg_adc_ch[3] <= wb_wdat; refresh_adc <= 1; end
                endcase
             end else begin
                case (wb_addr)
-                  8'h00: wb_rdat <= root;
-                  8'h01: wb_rdat <= {5'b0, quality};
+                  REG_CHORD_ROOT: wb_rdat <= reg_chord_root;
+                  REG_CHORD_QUALITY :wb_rdat <= {5'b0, reg_chord_quality};
                endcase
             end
          end
@@ -438,23 +444,23 @@ localparam ST_ADC_WAIT   = 4'd12;
             end
 
 				ST_IDLE: begin
-				   if (root_dirty) begin
+				   if (refresh_root_note) begin
 				      current_region <= REGION_NOTE;
-				      rom_base       <= NOTE_ROM_BASE + (root[3:0] * NOTE_BYTES);
+				      rom_base       <= NOTE_ROM_BASE + (reg_chord_root[3:0] * NOTE_BYTES);
 				      copy_len       <= NOTE_BYTES;
-				      root_dirty     <= 0;
+				      refresh_root_note     <= 0;
 				      addr_idx       <= 0;
 				      state          <= ST_ADDR_CMD;
-				   end else if (qual_dirty) begin
+				   end else if (refresh_chord_quality) begin
 				      current_region <= REGION_QUAL;
-				      rom_base       <= QUAL_ROM_BASE + ({9'b0, quality} * QUAL_BYTES);
+				      rom_base       <= QUAL_ROM_BASE + ({9'b0, reg_chord_quality} * QUAL_BYTES);
 				      copy_len       <= QUAL_BYTES;
-				      qual_dirty     <= 0;
+				      refresh_chord_quality     <= 0;
 				      addr_idx       <= 0;
 				      state          <= ST_ADDR_CMD;
-				   end else if (adc_dirty) begin
+				   end else if (refresh_adc) begin
 				      current_region <= REGION_ADC;
-				      adc_dirty      <= 0;
+				      refresh_adc      <= 0;
 				      addr_idx       <= 0;
 				      state          <= ST_ADDR_CMD;
 				   end

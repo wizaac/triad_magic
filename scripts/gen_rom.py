@@ -236,7 +236,7 @@ def main():
             bar = '█' * min(40, nz * 2)
             print(f'  {q}  {nz:3d} non-zero bytes  {bar}')
 
-    assert len(rom) == 2892, f'ROM total: expected 2346 bytes, got {len(rom)}'
+    assert len(rom) == 2892, f'ROM total: expected 2892 bytes, got {len(rom)}'
     print(f'  → 0x708–0x8DB  ({len(rom) - 1800} bytes)')
 
     # ── Write hex file ────────────────────────────────────────────────────────

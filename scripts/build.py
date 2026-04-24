@@ -52,6 +52,19 @@ deps = {
 	"pin_test_all": ["hdl/pin_test_all.v"],
    # --- pin identification sweeps ---
    "pin_sweep":    ["hdl/pin_sweep.v"],
+    "chord_channel":  ["hdl/spi_master.v", "hdl/shared_rom.v",
+                            "hdl/display_driver.v", "hdl/adc_reader.v","hdl/chord_channel.v"],
+
+	"triad_magic": [
+	    "hdl/spi_master.v",
+	    "hdl/shared_rom.v",
+	    "hdl/display_driver.v",
+	    "hdl/adc_reader.v",
+	    "hdl/chord_channel.v",
+	    "hdl/triad_magic.v",
+	],
+ 
+
 }
 
 src_files = " ".join(deps.get(top, [f"{SRC}/{top}.v"]))

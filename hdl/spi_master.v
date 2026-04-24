@@ -17,9 +17,9 @@
 //   "MCP4911"  — 20MHz max, USE_DC=0, WB_WIDTH=8
 
 module spi_master #(
-   parameter DEVICE     = "SSD1306", // documentation label
-   parameter USE_DC     = 1,         // 1 = DC sideband pin present
-   parameter WB_WIDTH   = 9,         // 8 or 9 (must be 9 when USE_DC=1)
+   parameter DEVICE     = "Generic", // documentation label
+   parameter USE_DC     = 0,         // 1 = DC sideband pin present
+   parameter WB_WIDTH   = 8,         // 8 or 9 (must be 9 when USE_DC=1)
    parameter CLK_DIV    = 50,        // sclk = clk / (2 * CLK_DIV)
    parameter FIFO_DEPTH = 4          // depth of TX and RX FIFOs
 )(

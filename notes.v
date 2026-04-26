@@ -1,0 +1,93 @@
+localparam C1    = 0;
+localparam CSH1  = 1;
+localparam D1    = 2;
+localparam DSH1  = 3;
+localparam E1    = 4;  // Rhodes Piano lowest
+localparam F1    = 5;
+localparam FSH1  = 6;
+localparam G1    = 7;
+localparam GSH1  = 8;
+localparam A1    = 9;
+localparam ASH1  = 10;
+localparam B1    = 11;
+
+localparam C2    = 12;
+localparam CSH2  = 13;
+localparam D2    = 14;
+localparam DSH2  = 15;
+localparam E2    = 16;
+localparam F2    = 17;
+localparam FSH2  = 18;
+localparam G2    = 19;
+localparam GSH2  = 20;
+localparam A2    = 21;
+localparam ASH2  = 22;
+localparam B2    = 23;
+
+localparam C3    = 24;
+localparam CSH3  = 25;
+localparam D3    = 26;
+localparam DSH3  = 27;
+localparam E3    = 28;
+localparam F3    = 29;
+localparam FSH3  = 30;
+localparam G3    = 31;
+localparam GSH3  = 32;
+localparam A3    = 33;
+localparam ASH3  = 34;
+localparam B3    = 35;
+
+localparam C4    = 36;
+localparam CSH4  = 37;
+localparam D4    = 38;
+localparam DSH4  = 39;
+localparam E4    = 40;
+localparam F4    = 41;
+localparam FSH4  = 42;
+localparam G4    = 43;
+localparam GSH4  = 44;
+localparam A4    = 45;  // concert A, 440Hz
+localparam ASH4  = 46;
+localparam B4    = 47;
+
+localparam C5    = 48;
+localparam CSH5  = 49;
+localparam D5    = 50;
+localparam DSH5  = 51;
+localparam E5    = 52;
+localparam F5    = 53;
+localparam FSH5  = 54;
+localparam G5    = 55;
+localparam GSH5  = 56;
+localparam A5    = 57;
+localparam ASH5  = 58;
+localparam B5    = 59;
+
+localparam C6    = 60;
+localparam CSH6  = 61;
+localparam D6    = 62;
+localparam DSH6  = 63;
+localparam E6    = 64;
+localparam F6    = 65;
+localparam FSH6  = 66;
+localparam G6    = 67;
+localparam GSH6  = 68;
+localparam A6    = 69;
+localparam ASH6  = 70;
+localparam B6    = 71;
+
+localparam C7    = 72;
+localparam CSH7  = 73;
+localparam D7    = 74;
+localparam DSH7  = 75;
+localparam E7    = 76;  // Rhodes Piano highest
+localparam F7    = 77;
+localparam FSH7  = 78;
+localparam G7    = 79;
+localparam GSH7  = 80;
+localparam A7    = 81;
+localparam ASH7  = 82;
+localparam B7    = 83;
+
+localparam C8    = 84;
+

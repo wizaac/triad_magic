@@ -146,7 +146,7 @@ module spi_master #(
                   if (!sclk_phase) begin
                      // Rising edge — sample MISO
                      sclk     <= 1;
-                     rx_shift <= {miso_r, rx_shift[7:1]};
+                     rx_shift <= { rx_shift[6:0],miso_r};
                   end else begin
                      // Falling edge — shift out next bit
                      sclk <= 0;

@@ -161,7 +161,7 @@ module adc_reader #(
 
          if (spi_wb_ack) spi_idle();
          wb_ack <= 0;
-
+			wb_rdat<='0;
          // ── Wishbone read interface ───────────────────────────
          if (wb_cyc && wb_stb && !wb_ack) begin
             wb_ack  <= 1;
@@ -259,7 +259,7 @@ module adc_reader #(
             ST_READ2_WAIT: begin
                if (spi_wb_ack) begin
                   spi_idle();
-                  rx2_nibble <= spi_wb_rdat[3:0];
+                  rx2_nibble <= spi_wb_rdat[4:1];
                   state      <= ST_READ3;
                end
             end

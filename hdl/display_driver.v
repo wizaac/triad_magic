@@ -297,8 +297,8 @@ localparam ST_ADC_WAIT   = 4'd12;
    localparam ST_COPY_WAIT  = 4'd9;
    localparam ST_COPY_PRIME  = 4'd10;
 
-	localparam REG_CHORD_ROOT		= 8'h00;
-	localparam REG_CHORD_QUALITY	= 8'h01;
+	localparam REG_CHORD_ROOT_ADDR		= 8'h00;
+	localparam REG_CHORD_QUALITY_ADDR	= 8'h01;
 	localparam REG_ADC_CH_0_ADDR 	= 8'h02;
 	localparam REG_ADC_CH_1_ADDR 	= 8'h03;
 	localparam REG_ADC_CH_2_ADDR 	= 8'h04;
@@ -370,19 +370,20 @@ localparam ST_ADC_WAIT   = 4'd12;
 
          if (spi_wb_ack) spi_idle();
          wb_ack <= 0;
-
+			wb_rdat<='0;
          // ── Wishbone register interface ───────────────────────
          if (wb_cyc && wb_stb && !wb_ack) begin
             wb_ack <= 1;
+				
             if (wb_we) begin
                case (wb_addr)
-                 REG_CHORD_ROOT : begin
+                 REG_CHORD_ROOT_ADDR : begin
                      if (wb_wdat != reg_chord_root) begin
                         reg_chord_root       <= wb_wdat;
                         refresh_root_note <= 1;
                      end
                   end
-                  REG_CHORD_QUALITY: begin
+                  REG_CHORD_QUALITY_ADDR: begin
                      if (wb_wdat[2:0] != reg_chord_quality) begin
                         reg_chord_quality    <= wb_wdat[2:0];
                         refresh_chord_quality <= 1;
@@ -396,8 +397,9 @@ localparam ST_ADC_WAIT   = 4'd12;
                endcase
             end else begin
                case (wb_addr)
-                  REG_CHORD_ROOT: wb_rdat <= reg_chord_root;
-                  REG_CHORD_QUALITY :wb_rdat <= {5'b0, reg_chord_quality};
+                  REG_CHORD_ROOT_ADDR: wb_rdat <= reg_chord_root;
+                  REG_CHORD_QUALITY_ADDR :wb_rdat <= {5'b0, reg_chord_quality};
+						default: wb_rdat <= 8'h00;
                endcase
             end
          end

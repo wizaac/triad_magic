@@ -82,53 +82,6 @@ module chord_channel #(
     input  wire [7:0]  testbus_sel  
 );
 
-// ── Channel state registers ───────────────────────────────────────────────
-localparam REG_BASS_NOTE	= 8'h00;
-localparam REG_MID_NOTE		= 8'h01;
-localparam REG_HIGH_NOTE	= 8'h02;
-localparam REG_CHORD_LENGTH= 8'h03;
-reg [7:0] reg_bass_note;
-reg [7:0] reg_mid_note;
-reg [7:0] reg_high_note;
-reg [7:0] reg_chord_length;
-
-// ── Top-level wishbone handler ────────────────────────────────────────────
-// Exposes channel state registers to the parent module.
-// Completely independent of the internal sequencer bus.
-reg [7:0] self_rdat;
-reg       self_ack;
-
-always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        self_ack      <= 0;
-        self_rdat     <= 0;
-        wb_ack_o    <= 0;
-        wb_rdat_o   <= 0;
-    end else begin
-        wb_ack_o <= 0;
-        if (wb_cyc_i && wb_stb_i && !wb_ack_o) begin
-            wb_ack_o <= 1;
-            if (wb_we_i) begin
-                case (wb_addr_i)
-						default: begin end
-                    //These are read-only regs REG_BASS_NOTE  :reg_bass_note <= wb_wdat;
-                    //These are read-only regs REG_MID_NOTE   :reg_mid_note  <= wb_wdat;
-                    //These are read-only regs REG_HIGH_NOTE  :reg_high_note <= wb_wdat;
-                    //These are read-only regs REG_CHORD_LENGTH:reg_chord_length    <= wb_wdat;
-                endcase
-            end else begin
-                case (wb_addr_i)
-                    REG_BASS_NOTE   : wb_rdat_o <=reg_bass_note;
-                    REG_MID_NOTE    : wb_rdat_o <=reg_mid_note;
-                    REG_HIGH_NOTE   : wb_rdat_o <=reg_high_note;
-                    REG_CHORD_LENGTH: wb_rdat_o <=reg_chord_length;
-                    default: wb_rdat_o <= 8'hFF;
-                endcase
-            end
-        end
-    end
-end
-
 
 // ── Internal shared wishbone bus ──────────────────────────────────────────
 // Driven exclusively by the sequencer.
@@ -146,10 +99,12 @@ wire [7:0] disp_wb_rdat;
 wire       disp_wb_ack;
 wire [7:0] adc_wb_rdat;
 wire       adc_wb_ack;
+wire [7:0] chord_wb_rdat;
+wire       chord_wb_ack;
 
 // OR-reduced bus response
-wire [7:0] wb_rdat = disp_wb_rdat | adc_wb_rdat;
-wire       wb_ack  = disp_wb_ack  | adc_wb_ack;
+wire [7:0] wb_rdat = disp_wb_rdat | adc_wb_rdat | chord_wb_rdat;
+wire       wb_ack  = disp_wb_ack  | adc_wb_ack | chord_wb_ack;
 
 // Address page decode — top 4 bits select the module
 wire sel_disp  = (wb_addr[7:4] == 4'h1);
@@ -171,7 +126,7 @@ display_driver #(
     .testbus    (testbus),
     .wb_cyc     (wb_cyc & sel_disp),
     .wb_stb     (wb_stb & sel_disp),
-    .wb_we      (wb_we),
+    .wb_we      (wb_we & sel_disp),
     .wb_addr    ({4'h0,wb_addr[3:0]}),           // display driver uses [3:0] internally; slice data since top byte=module select, bottom byte= reg in that module
     .wb_wdat    (wb_wdat),
     .wb_rdat    (disp_wb_rdat),
@@ -194,7 +149,7 @@ adc_reader #(
     .rst_n    (rst_n),
     .wb_cyc   (wb_cyc & sel_adc),
     .wb_stb   (wb_stb & sel_adc),
-    .wb_we    (wb_we),
+    .wb_we    (wb_we & sel_adc),
     .wb_addr  (wb_addr[2:0]),
     .wb_rdat  (adc_wb_rdat),
     .wb_ack   (adc_wb_ack),
@@ -204,12 +159,22 @@ adc_reader #(
     .spi_cs_n (adc_cs_n)
 );
 
-// ── Address map base addresses ────────────────────────────────────────────
-localparam BASE_SELF  = 8'h00;
-localparam BASE_DISP  = 8'h10;
-localparam BASE_ADC   = 8'h20;
-localparam BASE_CHORD = 8'h30;   // reserved
-localparam BASE_DEC   = 8'h40;   // reserved
+// ── Chord Engine ────────────────────────────────────────────────────────
+chord_engine #(
+    .LINEAR (0)
+) eng (
+    .clk        (clk),
+    .rst_n      (rst_n),
+    .testbus    (testbus),
+    .wb_cyc     (wb_cyc & sel_chord),
+    .wb_stb     (wb_stb & sel_chord),
+    .wb_we      (wb_we & sel_chord),
+    .wb_addr    ({4'h0,wb_addr[3:0]}),           // display driver uses [3:0] internally; slice data since top byte=module select, bottom byte= reg in that module
+    .wb_wdat    (wb_wdat),
+    .wb_rdat    (chord_wb_rdat),
+    .wb_ack     (chord_wb_ack)
+);
+
 
 // ── Microcode step encoding ───────────────────────────────────────────────
 // This sequencer executes a MOV instruction between connected address space wishbone entities
@@ -221,40 +186,81 @@ localparam MOV_READ_WB_WRITE_WAIT_ACK   = 2'd3;
 // ── Program ROM ───────────────────────────────────────────────────────────
 // Each instruction: { src_addr[7:0], dst_addr[7:0] }
 // Module is implicit in the address page — no separate mod field.
-// NOPs are self→self moves (BASE_SELF|0x00 → BASE_SELF|0x00).
+// NOPs are self→self moves (BASE_CHAN|0x00 → BASE_CHAN|0x00).
 // Slots 8-11 are placeholders for chord engine / decoder moves.
 
-localparam FORKLIFT_ROUTE_LEN = 12;
-localparam INSTR_W  = 6;
+localparam FORKLIFT_ROUTE_LEN = 16;
+localparam INSTR_W  = 16;
 
 
 // The program — edit this to change what the sequencer does each frame
 reg [INSTR_W-1:0] forklift_route [0:FORKLIFT_ROUTE_LEN-1];
 // Internal bus register map
-localparam REG_SELF_BASS      = 8'h00;
-localparam REG_SELF_MID       = 8'h01;
-localparam REG_SELF_HIGH      = 8'h02;
-localparam REG_SELF_LENGTH    = 8'h03;
+localparam REG_CHAN_ROOT_ADDR      = 8'h00;
+localparam REG_CHAN_BASS_ADDR      = 8'h01;
+localparam REG_CHAN_MID_ADDR       = 8'h02;
+localparam REG_CHAN_HIGH_ADDR      = 8'h03;
+localparam REG_CHAN_LENGTH_ADDR    = 8'h04;
 
-localparam REG_DISP_ROOT      = 8'h10;
-localparam REG_DISP_QUALITY   = 8'h11;
-localparam REG_DISP_ADC_CH0   = 8'h12;
-localparam REG_DISP_ADC_CH1   = 8'h13;
-localparam REG_DISP_ADC_CH2   = 8'h14;
-localparam REG_DISP_ADC_CH3   = 8'h15;
+localparam REG_DISP_ROOT_ADDR      = 8'h10;
+localparam REG_DISP_QUALITY_ADDR   = 8'h11;
+localparam REG_DISP_ADC_CH0_ADDR   = 8'h12;
+localparam REG_DISP_ADC_CH1_ADDR   = 8'h13;
+localparam REG_DISP_ADC_CH2_ADDR   = 8'h14;
+localparam REG_DISP_ADC_CH3_ADDR   = 8'h15;
 
-localparam REG_ADC_POT0       = 8'h20;
-localparam REG_ADC_POT1       = 8'h21;
-localparam REG_ADC_POT2       = 8'h22;
-localparam REG_ADC_POT3       = 8'h23;
+localparam REG_ADC_POT0_ADDR       = 8'h20;
+localparam REG_ADC_POT1_ADDR       = 8'h21;
+localparam REG_ADC_POT2_ADDR       = 8'h22;
+localparam REG_ADC_POT3_ADDR       = 8'h23;
+
+localparam REG_CHORD_ROOT_RAW_ADDR 		= 8'h30;
+localparam REG_CHORD_QUALITY_RAW_ADDR 	= 8'h31;
+localparam REG_CHORD_INVERSION_RAW_ADDR= 8'h32;
+localparam REG_CHORD_LENGTH_RAW_ADDR	= 8'h33;
+localparam REG_CHORD_ROOT_NOTE_ADDR 	= 8'h34;
+localparam REG_CHORD_BASS_NOTE_ADDR 	= 8'h35;
+localparam REG_CHORD_MID_NOTE_ADDR 		= 8'h36;
+localparam REG_CHORD_HIGH_NOTE_ADDR 	= 8'h37;
+localparam REG_CHORD_DURATION_ADDR 		= 8'h38;
+localparam REG_CHORD_QUALITY_ADDR 		= 8'h39;
+localparam REG_CHORD_STATUS_ADDR 		= 8'h3a;
+
+
+reg [7:0] reg_root_note;
+reg [7:0] reg_bass_note;
+reg [7:0] reg_mid_note;
+reg [7:0] reg_high_note;
+reg [7:0] reg_chord_length;
+
+
 initial begin
     //              src address              dst address
-    forklift_route[0]  = { REG_ADC_POT0,  REG_DISP_ADC_CH0};  // pot[0] → disp adc_ch[0]
-    forklift_route[1]  = { REG_ADC_POT1,  REG_DISP_ADC_CH1};  // pot[1] → disp adc_ch[1]
-    forklift_route[2]  = { REG_ADC_POT2,  REG_DISP_ADC_CH2};  // pot[2] → disp adc_ch[2]
-    forklift_route[3]  = { REG_ADC_POT3,  REG_DISP_ADC_CH3};  // pot[3] → disp adc_ch[3]
-    forklift_route[4]  = { REG_ADC_POT0,  REG_DISP_ROOT   };  // pot[0] → disp root
-    forklift_route[5]  = { REG_ADC_POT1,  REG_DISP_QUALITY};  // pot[1] → disp quality
+	//Send raw pot data to display for debug
+    forklift_route[0]  = { REG_ADC_POT0_ADDR,  REG_DISP_ADC_CH0_ADDR};  // pot[0] → disp adc_ch[0] //Debug display raw pot val
+    forklift_route[1]  = { REG_ADC_POT1_ADDR,  REG_DISP_ADC_CH1_ADDR};  // pot[1] → disp adc_ch[1]
+    forklift_route[2]  = { REG_ADC_POT2_ADDR,  REG_DISP_ADC_CH2_ADDR};  // pot[2] → disp adc_ch[2]
+    forklift_route[3]  = { REG_ADC_POT3_ADDR,  REG_DISP_ADC_CH3_ADDR};  // pot[3] → disp adc_ch[3]
+
+	//load raw pot data to chord engine for processing
+    forklift_route[4]  = { REG_ADC_POT0_ADDR,  REG_CHORD_ROOT_RAW_ADDR   };  		
+    forklift_route[5]  = { REG_ADC_POT1_ADDR,  REG_CHORD_QUALITY_RAW_ADDR   };  	
+    forklift_route[6]  = { REG_ADC_POT2_ADDR,  REG_CHORD_INVERSION_RAW_ADDR   };  
+    forklift_route[7]  = { REG_ADC_POT3_ADDR,  REG_CHORD_LENGTH_RAW_ADDR   };  	  
+
+	//Load chord engine notes into channel top registers
+    forklift_route[8]  = { REG_CHORD_ROOT_NOTE_ADDR, REG_CHAN_ROOT_ADDR    };  
+    forklift_route[9]  = { REG_CHORD_BASS_NOTE_ADDR, REG_CHAN_BASS_ADDR    }; 
+    forklift_route[10]  = { REG_CHORD_MID_NOTE_ADDR, REG_CHAN_MID_ADDR };  
+    forklift_route[11]  = { REG_CHORD_HIGH_NOTE_ADDR,REG_CHAN_HIGH_ADDR  }; 
+    forklift_route[12]  = { REG_CHAN_LENGTH_ADDR, REG_CHAN_LENGTH_ADDR };  
+
+	//Load chord engine notes into display
+    forklift_route[13]  = { REG_CHORD_ROOT_NOTE_ADDR, REG_DISP_ROOT_ADDR    };  
+    forklift_route[14]  = { REG_CHORD_QUALITY_ADDR,  REG_DISP_QUALITY_ADDR   };  
+
+    forklift_route[15]  = { REG_CHAN_ROOT_ADDR,  REG_CHAN_ROOT_ADDR    };  //NOOP
+
 end
 
 
@@ -439,4 +445,44 @@ always @(posedge clk or negedge rst_n) begin
         wb_deassert();
     end
 end
+
+// ── Top-level wishbone handler ────────────────────────────────────────────
+// Exposes channel state registers to the parent module.
+// Completely independent of the internal sequencer bus.
+reg [7:0] self_rdat;
+reg       self_ack;
+
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        self_ack      <= 0;
+        self_rdat     <= 0;
+        wb_ack_o    <= 0;
+        wb_rdat_o   <= 0;
+    end else begin
+        wb_ack_o <= 0;
+        if (wb_cyc_i && wb_stb_i && !wb_ack_o) begin
+            wb_ack_o <= 1;
+            if (wb_we_i) begin
+                case (wb_addr_i)
+						default: begin end
+                    //These are read-only regs REG_BASS_NOTE  :reg_bass_note <= wb_wdat;
+                    //These are read-only regs REG_MID_NOTE   :reg_mid_note  <= wb_wdat;
+                    //These are read-only regs REG_HIGH_NOTE  :reg_high_note <= wb_wdat;
+                    //These are read-only regs REG_CHORD_LENGTH:reg_chord_length    <= wb_wdat;
+                endcase
+            end else begin
+                case (wb_addr_i)
+                    REG_CHAN_BASS_ADDR   : wb_rdat_o <=reg_root_note;
+                    REG_CHAN_BASS_ADDR   : wb_rdat_o <=reg_bass_note;
+                    REG_CHAN_MID_ADDR    : wb_rdat_o <=reg_mid_note;
+                    REG_CHAN_HIGH_ADDR   : wb_rdat_o <=reg_high_note;
+                    REG_CHAN_LENGTH_ADDR: wb_rdat_o <=reg_chord_length;
+                    default: wb_rdat_o <= 8'h00;
+                endcase
+            end
+        end
+    end
+end
+
+
 endmodule

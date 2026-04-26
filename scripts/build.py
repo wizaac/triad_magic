@@ -61,7 +61,10 @@ deps = {
 	    "hdl/display_driver.v",
 	    "hdl/adc_reader.v",
 	    "hdl/chord_channel.v",
+	    "hdl/chord_engine.v",
 	    "hdl/triad_magic.v",
+		 "notes.v",
+		 "hdl/pot_decoder.v",
 	],
  
 

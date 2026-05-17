@@ -11,7 +11,7 @@ parser.add_argument("-clean",  action="store_true")
 parser.add_argument("-sim", action="store_true", help="Run simulation in Questa")
 parser.add_argument("-wave", action="store_true", help="Open waveform viewer")
 parser.add_argument("-pcf", type=str, default="alchitry_cu.pcf")
-
+parser.add_argument("-stat", action="store_true", help="Run hierarchical area report")
 
 args = parser.parse_args()
 
@@ -111,11 +111,15 @@ pnr_cmd   = (f"nextpnr-ice40 --{DEVICE} --package {PACKAGE} "
              f"--pcf {PCF} --asc {BUILD}/{top}.asc")
 pack_cmd  = f"icepack {BUILD}/{top}.asc {BUILD}/{top}.bin"
 prog_cmd  = f"iceprog {BUILD}/{top}.bin"
-
+stat_cmd = (f"yosys -p 'synth_ice40 -top {top} -json {BUILD}/{top}.json; stat -hierarchy' "
+            f"-l {BUILD}/{top}_stat.log "
+            f"{src_files}")
 if args.clean:
     os.system(f"rm -rf {BUILD}/*")
     print("Build directory cleaned")
-
+if args.stat:
+    print("=== Hierarchical Area Report ===")
+    ret = os.system(stat_cmd)
 
 if args.sim:
     os.makedirs(SIM_BUILD, exist_ok=True)
